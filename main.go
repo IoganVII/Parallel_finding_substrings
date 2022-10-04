@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -12,9 +11,8 @@ import (
 
 func main() {
 
-	fmt.Println("Кол-во лог. ядер на машине:", runtime.NumCPU())
-
 	totalCount := 0
+	// Урлы ведут на Стенд Elma365, там АПИ модуля. Апи возвращает строку.
 	sliceUrl := []string{
 		"https://gtc5awmle2xwu.elma365.ru/api/extensions/3954a56f-8569-40c6-8f51-54ef45731c89/script/getDataString?id=4956bf29-3649-4f62-8587-1fac3a8d90cb",
 		"https://gtc5awmle2xwu.elma365.ru/api/extensions/3954a56f-8569-40c6-8f51-54ef45731c89/script/getDataString?id=84367f05-50a6-4d86-bae5-d1a9fe7dbb67",
@@ -63,35 +61,30 @@ func main() {
 	wg := sync.WaitGroup{}
 	// Мьютекс для синхронизации работы с критической секцией
 	m := sync.Mutex{}
-	start := time.Now()
+
+	// Хочу посмотреть, за сколько выполняется логика программы
+	timeStart := time.Now()
 
 	// Начинаем перебирать слайс с URL
-	for _, value := range sliceUrl {
+	for _, url := range sliceUrl {
 		wg.Add(1)
 		// Занести данные в канал. Когда буфер будет заполнен - тут встанем на ожидание момента, когда в буфере освободится место
 		chanel <- 1
 		// Вызов фунции для получения данных по URL и подсчёта кол-ва вхождения подстроки
-		go searchSubstring(&totalCount, value, chanel, &wg, &m)
+		go searchSubstring(&totalCount, url, chanel, &wg, &m)
+		// Посмотрим - правда ли у нас тут 5 гоРутин работает
+		//fmt.Println("Кол-во гоРутин: ", len(chanel))
 	}
-	/*
-		Тут оставим цикл в одном потоке, чтобы сравнить - насколько мы быстры наши потоки
-			for _, value := range sliceUrl {
-				// Получаем Данные по URL
-				resp, _ := http.Get(value)
-				// Получаем байтМассив тела ответа
-				body, _ := io.ReadAll(resp.Body)
-				// Получаем кол-во вхождений
-				countSubstring := strings.Count(string(body), "go")
-				totalCount += countSubstring
-			}*/
 
 	wg.Wait()
 
 	fmt.Println("Всего кол-во вхождений = ", totalCount)
-	fmt.Println(time.Now().Sub(start))
+
+	fmt.Println("Время выполнения работы: ", time.Now().Sub(timeStart))
 }
 
-func searchSubstring(totalCount *int, data string, chanel chan int, wg *sync.WaitGroup, m *sync.Mutex) {
+// Функция для подсчёта кол-во подстрок go в строке
+func searchSubstring(totalCount *int, url string, chanel chan int, wg *sync.WaitGroup, m *sync.Mutex) {
 
 	// Вызываем функцию после окончания работы родительской функции
 	defer func() {
@@ -102,24 +95,24 @@ func searchSubstring(totalCount *int, data string, chanel chan int, wg *sync.Wai
 	}()
 
 	// Получаем Данные по URL
-	resp, er := http.Get(data)
+	resp, er := http.Get(url)
 	if er != nil {
-		panic("Ошибка при вызове АПИ по url: " + data)
+		panic("Ошибка при вызове АПИ по url: " + url)
 	}
 	// Получаем байтМассив тела ответа
-	body, er := io.ReadAll(resp.Body)
+	responseBody, er := io.ReadAll(resp.Body)
 	if er != nil {
-		panic("Ошибка при вызове АПИ по url: " + data)
+		panic("Ошибка при вызове АПИ по url: " + url)
 	}
 	// Получаем кол-во вхождений
-	countSubstring := strings.Count(string(body), "go")
-	fmt.Println("Кол-во Горутин:", runtime.NumGoroutine())
-	fmt.Println("Кол-во вхождуения для:", data, " = ", countSubstring)
+	countSubstring := strings.Count(string(responseBody), "go")
+	fmt.Println("Кол-во вхождуения для:", url, " = ", countSubstring)
 
-	// Блокируем работу с критической секцией
+	// Блокируем работу с критической секцией. всё-таки с одним элементом 5 потоков работают. Хочу синхронизацию
 	m.Lock()
 	*totalCount += countSubstring
-	fmt.Println(*totalCount)
+	// Пологировать можем, корректная ли работа с критической секцией
+	//fmt.Println(*totalCount)
 	m.Unlock()
 
 }
